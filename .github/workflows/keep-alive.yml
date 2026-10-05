@@ -1,0 +1,47 @@
+name: keep-alive
+
+# Free-tier backends go to sleep when idle (Render after 15 minutes, Hugging Face
+# Spaces after 48 hours). Pinging them every 5 minutes keeps them awake.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+    # Monthly heartbeat commit: GitHub disables scheduled workflows in a repo
+    # with no activity for 60 days.
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping services
+        run: |
+          while read -r name url; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 --retry 2 --retry-delay 10 "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "$name: up"
+            else
+              echo "::warning::$name returned ${code:-no response} ($url)"
+            fi
+          done <<'URLS'
+          examsense https://examsense-vlv9.onrender.com/
+          ai-pentester https://hkfdihjebfvhdfbvgre-ai-pentester.hf.space/health
+          URLS
+
+  heartbeat:
+    if: github.event.schedule == '17 3 1 * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Commit heartbeat
+        run: |
+          date -u +%Y-%m-%dT%H:%M:%SZ > last-heartbeat.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add last-heartbeat.txt
+          git commit -m "chore: monthly heartbeat"
+          git push
